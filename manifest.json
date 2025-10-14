@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Personio Planned Overtime Tracker",
+  "version": "1.3.3",
+  "description": "A browser extension that helps track and adjust overtime hours in Personio by automatically calculating planned time off and providing feedback on actual vs. planned overtime values.",
+  "icons": {
+    "128": "icons/icon128x128.png"
+  },
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": ["*://*.personio.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["*://*.personio.com/*"],
+      "js": ["content-script.js"]
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "overtime-adjuster-for-personio@example.com"
+    }
+  }
+}
