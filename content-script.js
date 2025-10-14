@@ -30,14 +30,28 @@ class PersonioOvertimeAdjuster {
 
   init() {
     this.currentUrl = location.href;
+    console.log(
+      "PersonioOvertimeAdjuster: Initializing on URL:",
+      this.currentUrl
+    );
 
     this.setupUrlMonitoring();
     this.setupMessageListener();
 
     if (this.isAttendancePage()) {
+      console.log(
+        "PersonioOvertimeAdjuster: On attendance page, starting observer"
+      );
       this.startObservingPage();
-    } else if (this.isCalendarPage()) {
+    } else if (this.isCalendarExtractionPage()) {
+      console.log(
+        "PersonioOvertimeAdjuster: On extraction page, handling calendar page"
+      );
       this.handleCalendarPage();
+    } else {
+      console.log(
+        "PersonioOvertimeAdjuster: Not on attendance or extraction page, doing nothing"
+      );
     }
   }
 
@@ -158,8 +172,12 @@ class PersonioOvertimeAdjuster {
     if (this.currentUrl !== location.href) {
       const wasAttendancePage = this.currentUrl.includes(this.attendanceUrl);
       const isAttendancePage = location.href.includes(this.attendanceUrl);
-      const wasCalendarPage = this.currentUrl.includes(this.calendarUrl);
-      const isCalendarPage = location.href.includes(this.calendarUrl);
+      const wasCalendarExtractionPage =
+        this.currentUrl.includes(this.calendarUrl) &&
+        this.currentUrl.includes(
+          "absenceTypeId=0a405db0-f811-481e-a70b-5464ce2698ec"
+        );
+      const isCalendarExtractionPage = this.isCalendarExtractionPage();
 
       this.currentUrl = location.href;
 
@@ -170,8 +188,18 @@ class PersonioOvertimeAdjuster {
         this.resetState();
       }
 
-      if (!wasCalendarPage && isCalendarPage) {
+      if (!wasCalendarExtractionPage && isCalendarExtractionPage) {
+        console.log(
+          "PersonioOvertimeAdjuster: URL change detected - triggering handleCalendarPage"
+        );
         this.handleCalendarPage();
+      } else {
+        console.log(
+          "PersonioOvertimeAdjuster: URL change - not triggering extraction. Was extraction page:",
+          wasCalendarExtractionPage,
+          "Is extraction page:",
+          isCalendarExtractionPage
+        );
       }
     }
   }
@@ -191,9 +219,47 @@ class PersonioOvertimeAdjuster {
   }
 
   /**
+   * Checks if current page is the specific calendar extraction URL
+   */
+  isCalendarExtractionPage() {
+    return (
+      location.href.includes(this.calendarUrl) &&
+      location.href.includes(
+        "absenceTypeId=0a405db0-f811-481e-a70b-5464ce2698ec"
+      )
+    );
+  }
+
+  /**
    * Handles calendar page - extracts future leave days and communicates back to attendance page
    */
   async handleCalendarPage() {
+    console.log(
+      "PersonioOvertimeAdjuster: handleCalendarPage called, current URL:",
+      location.href
+    );
+
+    // Only extract if we're on the specific absence type page
+    if (!this.isCalendarExtractionPage()) {
+      console.log(
+        "PersonioOvertimeAdjuster: On calendar page but not extraction URL, skipping extraction completely"
+      );
+      console.log(
+        "PersonioOvertimeAdjuster: URL check - calendarUrl included:",
+        location.href.includes(this.calendarUrl)
+      );
+      console.log(
+        "PersonioOvertimeAdjuster: URL check - absenceTypeId included:",
+        location.href.includes(
+          "absenceTypeId=0a405db0-f811-481e-a70b-5464ce2698ec"
+        )
+      );
+      return;
+    }
+
+    console.log(
+      "PersonioOvertimeAdjuster: URL check passed, proceeding with extraction"
+    );
     try {
       const extractedDays = await this.extractFutureLeaveDays();
       this.saveExtractedDaysOff(extractedDays);
@@ -205,8 +271,11 @@ class PersonioOvertimeAdjuster {
       this.scheduleCalendarPageClose(extractedDays);
     } catch (error) {
       console.error("Error handling calendar page:", error);
-      this.saveExtractedDaysOff("0");
-      this.scheduleCalendarPageClose("0");
+      // Only save error values if we're on the correct extraction page
+      if (this.isCalendarExtractionPage()) {
+        this.saveExtractedDaysOff("0");
+        this.scheduleCalendarPageClose("0");
+      }
     }
   }
 
@@ -255,7 +324,18 @@ class PersonioOvertimeAdjuster {
   scheduleCalendarPageClose(extractedValue) {
     setTimeout(() => {
       this.notifyParentWindow(extractedValue);
-      window.close();
+
+      // Only close the window if it was opened by the extension (has an opener)
+      if (window.opener && !window.opener.closed) {
+        console.log(
+          "PersonioOvertimeAdjuster: Window was opened by extension, closing automatically"
+        );
+        window.close();
+      } else {
+        console.log(
+          "PersonioOvertimeAdjuster: Window not opened by extension, leaving it open for user"
+        );
+      }
     }, 2000);
   }
 
@@ -265,6 +345,10 @@ class PersonioOvertimeAdjuster {
   notifyParentWindow(extractedValue) {
     try {
       if (window.opener && !window.opener.closed) {
+        console.log(
+          "PersonioOvertimeAdjuster: Notifying parent window of extracted value:",
+          extractedValue
+        );
         window.opener.postMessage(
           {
             type: "personioCalendarExtraction",
@@ -272,9 +356,16 @@ class PersonioOvertimeAdjuster {
           },
           "*"
         );
+      } else {
+        console.log(
+          "PersonioOvertimeAdjuster: No parent window to notify (user opened tab manually)"
+        );
       }
     } catch (error) {
-      console.error("Error notifying parent window:", error);
+      console.error(
+        "PersonioOvertimeAdjuster: Error notifying parent window:",
+        error
+      );
     }
   }
 
@@ -628,9 +719,32 @@ class PersonioOvertimeAdjuster {
    */
   saveExtractedDaysOff(value) {
     try {
+      console.log(
+        "PersonioOvertimeAdjuster: Attempting to save extracted days:",
+        value,
+        "on URL:",
+        location.href
+      );
+
+      // Only save if we're on the correct extraction page or if the value is not "0"
+      // This prevents overwriting valid data with "0" from wrong pages
+      if (!this.isCalendarExtractionPage() && value === "0") {
+        console.log(
+          'PersonioOvertimeAdjuster: Prevented saving "0" on non-extraction page'
+        );
+        return;
+      }
+
       localStorage.setItem(this.extractedDaysOffKey, value);
+      console.log(
+        "PersonioOvertimeAdjuster: Successfully saved extracted days:",
+        value
+      );
     } catch (error) {
-      console.error("Error saving extracted days off to localStorage:", error);
+      console.error(
+        "PersonioOvertimeAdjuster: Error saving extracted days off to localStorage:",
+        error
+      );
     }
   }
 
