@@ -85,6 +85,6 @@ Appears when your current input differs from the last extracted value.
 
 ---
 
-## Bug Reports
+## 🐞 Bug Reports
 
 Any bug, issue, or improvement can be reported to **armin.schneider@timetoact.at**.
